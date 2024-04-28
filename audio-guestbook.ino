@@ -65,7 +65,7 @@ File frec;
 Bounce buttonRecord = Bounce(HOOK_PIN, 40);
 
 // Keep track of current state of the device
-enum Mode {Initialising, Ready, StartGreeting, PlayGreeting, PlayStartBeep, StartRecording, Recording, PlayEndBeep};
+enum Mode {Initialising, Ready, WaitForUser, StartGreeting, PlayGreeting, PlayStartBeep, StartRecording, Recording, PlayEndBeep};
 Mode mode = Mode::Initialising;
 
 float beep_volume = 0.2f; // not too loud :-)
@@ -85,6 +85,10 @@ unsigned long Subchunk2Size = 0L;
 unsigned long recByteSaved = 0L;
 unsigned long NumSamples = 0L;
 byte byte1, byte2, byte3, byte4;
+
+// variables to set up waiting
+unsigned long previousMillis;
+const long msToWaitForUser = 1000;
 
 void setup() {
   Serial.begin(9600);
@@ -145,7 +149,7 @@ void setup() {
 
   // Play a beep to indicate system is online
   waveform1.begin(beep_volume, 440, WAVEFORM_SINE);
-  wait(1000);
+  delay(1000);
   waveform1.amplitude(0);
   delay(1000);
 }
@@ -159,15 +163,28 @@ void loop() {
       // Falling edge occurs when the handset is lifted --> 611 telephone
       if (buttonRecord.fallingEdge()) {
         Serial.println("Handset lifted");
-        mode = Mode::StartGreeting; print_mode();
+        // Wait a second for users to put the handset to their ear
+        previousMillis = millis();
+        mode = Mode::WaitForUser; print_mode();
       }
       break;
 
-    case Mode::StartGreeting:
-      // Wait a second for users to put the handset to their ear
-      delay(1000);
+    case Mode::WaitForUser:
       if (buttonRecord.risingEdge()) {
         mode = Mode::Ready; print_mode();
+        break;
+      }
+
+      if (millis() - previousMillis >= msToWaitForUser) {
+        mode = Mode::StartGreeting; print_mode();
+      }
+
+      break;
+
+    case Mode::StartGreeting:
+      if (buttonRecord.risingEdge()) {
+        mode = Mode::Ready; print_mode();
+        break;
       }
       // Play the greeting inviting them to record their message
       playWav1.play("greeting.wav");
@@ -221,6 +238,7 @@ void loop() {
       } else {
         // Play audio tone to confirm recording has ended
         end_Beep();
+        mode = Mode::Ready; print_mode();
       }
       break;
 
@@ -437,6 +455,7 @@ void print_mode(void) { // only for debugging
   Serial.print("Mode switched to: ");
   // Initialising, Ready, Prompting, Recording, Playing
   if(mode == Mode::Ready)               Serial.println(" Ready");
+  else if(mode == Mode::WaitForUser)    Serial.println(" WaitForUser");
   else if(mode == Mode::StartGreeting)  Serial.println(" StartGreeting");
   else if(mode == Mode::PlayGreeting)   Serial.println(" PlayGreeting");
   else if(mode == Mode::PlayStartBeep)  Serial.println(" PlayStartBeep");
