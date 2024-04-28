@@ -37,7 +37,6 @@
 #define SDCARD_SCK_PIN   13
 // And those used for inputs
 #define HOOK_PIN 0
-#define PLAYBACK_BUTTON_PIN 1
 
 #define noINSTRUMENT_SD_WRITE
 
@@ -64,13 +63,12 @@ File frec;
 
 // Use long 40ms debounce time on both switches
 Bounce buttonRecord = Bounce(HOOK_PIN, 40);
-Bounce buttonPlay = Bounce(PLAYBACK_BUTTON_PIN, 40);
 
 // Keep track of current state of the device
-enum Mode {Initialising, Ready, Prompting, Recording, Playing};
+enum Mode {Initialising, Ready, Prompting, PlayGreeting, Recording, PlayEndBeep};
 Mode mode = Mode::Initialising;
 
-float beep_volume = 0.4f; // not too loud :-)
+float beep_volume = 0.95f; // not too loud :-)
 
 uint32_t MTPcheckInterval; // default value of device check interval [ms]
 
@@ -98,7 +96,6 @@ void setup() {
   print_mode();
   // Configure the input pins
   pinMode(HOOK_PIN, INPUT_PULLUP);
-  pinMode(PLAYBACK_BUTTON_PIN, INPUT_PULLUP);
 
   // Audio connections require memory, and the record queue
   // uses this memory to buffer incoming audio.
@@ -125,11 +122,9 @@ void setup() {
       Serial.println("Unable to access the SD card");
       delay(500);
     }
-  }
-  else {
+  } else {
     Serial.println("SD card correctly initialized");
   }
-
 
   // mandatory to begin the MTP session.
   MTP.begin();
@@ -157,9 +152,8 @@ void setup() {
 }
 
 void loop() {
-  // First, read the buttons
+  // First, read the button
   buttonRecord.update();
-  buttonPlay.update();
 
   switch(mode){
     case Mode::Ready:
@@ -167,11 +161,6 @@ void loop() {
       if (buttonRecord.fallingEdge()) {
         Serial.println("Handset lifted");
         mode = Mode::Prompting; print_mode();
-      }
-      else if(buttonPlay.fallingEdge()) {
-        playLastRecording();
-      } else {
-        mode = Mode::Ready;
       }
 
       break;
@@ -185,19 +174,13 @@ void loop() {
       while (!playWav1.isStopped()) {
         // Check whether the handset is replaced
         buttonRecord.update();
-        buttonPlay.update();
+
         // Handset is replaced
         if(buttonRecord.risingEdge()) {
           playWav1.stop();
           mode = Mode::Ready; print_mode();
           return;
         }
-        if(buttonPlay.fallingEdge()) {
-          playWav1.stop();
-          playLastRecording();
-          return;
-        }
-        
       }
       Serial.println("Starting Recording");
       // Play the tone sound effect
@@ -221,8 +204,11 @@ void loop() {
       }
       break;
 
-    case Mode::Playing: // to make compiler happy
-      break;  
+    case Mode::PlayGreeting:
+      break;
+
+    case Mode::PlayEndBeep:
+      break;
 
     case Mode::Initialising: // to make compiler happy
       break;  
@@ -334,39 +320,6 @@ void stopRecording() {
   setMTPdeviceChecks(true); // enable MTP device checks, recording is finished
 }
 
-void playLastRecording() {
-  // Find the first available file number
-  uint16_t idx = 0; 
-  for (uint16_t i=0; i<9999; i++) {
-    // Format the counter as a five-digit number with leading zeroes, followed by file extension
-    snprintf(filename, 11, " %05d.wav", i);
-    // check, if file with index i exists
-    if (!SD.exists(filename)) {
-     idx = i - 1;
-     break;
-    }
-  }
-  // now play file with index idx == last recorded file
-  snprintf(filename, 11, " %05d.wav", idx);
-  Serial.println(filename);
-  playWav1.play(filename);
-  mode = Mode::Playing; print_mode();
-  while (!playWav1.isStopped()) { // this works for playWav
-    buttonPlay.update();
-    buttonRecord.update();
-    // Button is pressed again
-    if(buttonPlay.fallingEdge() || buttonRecord.risingEdge()) {
-      playWav1.stop();
-      mode = Mode::Ready; print_mode();
-      return;
-    }
-  }
-  // file has been played
-  mode = Mode::Ready; print_mode();  
-  end_Beep();
-}
-
-
 // Retrieve the current time from Teensy built-in RTC
 time_t getTeensy3Time(){
   return Teensy3Clock.get();
@@ -385,21 +338,16 @@ void dateTime(uint16_t* date, uint16_t* time, uint8_t* ms10) {
   *ms10 = second() & 1 ? 100 : 0;
 }
 
-// Non-blocking delay, which pauses execution of main program logic,
-// but while still listening for input 
+// blocking delay, which pauses execution of main program logic,
 void wait(unsigned int milliseconds) {
   elapsedMillis msec=0;
 
   while (msec <= milliseconds) {
-    buttonRecord.update();
-    buttonPlay.update();
-    if (buttonRecord.fallingEdge()) Serial.println("Button (pin 0) Handset lifted");
-    if (buttonPlay.fallingEdge()) Serial.println("Button (pin 1) Press");
-    if (buttonRecord.risingEdge()) Serial.println("Button (pin 0) Handset returned");
-    if (buttonPlay.risingEdge()) Serial.println("Button (pin 1) Release");
+    //buttonRecord.update();
+    //if (buttonRecord.fallingEdge()) Serial.println("Button (pin 0) Handset lifted");
+    //if (buttonRecord.risingEdge()) Serial.println("Button (pin 0) Handset returned");
   }
 }
-
 
 void writeOutHeader() { // update WAV header with final filesize/datasize
   ChunkSize = Subchunk2Size + 34; // was 36;
@@ -476,7 +424,6 @@ void print_mode(void) { // only for debugging
   if(mode == Mode::Ready)           Serial.println(" Ready");
   else if(mode == Mode::Prompting)  Serial.println(" Prompting");
   else if(mode == Mode::Recording)  Serial.println(" Recording");
-  else if(mode == Mode::Playing)    Serial.println(" Playing");
   else if(mode == Mode::Initialising)  Serial.println(" Initialising");
   else Serial.println(" Undefined");
 }
