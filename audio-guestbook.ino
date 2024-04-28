@@ -65,10 +65,10 @@ File frec;
 Bounce buttonRecord = Bounce(HOOK_PIN, 40);
 
 // Keep track of current state of the device
-enum Mode {Initialising, Ready, Prompting, PlayGreeting, Recording, PlayEndBeep};
+enum Mode {Initialising, Ready, Prompting, PlayGreeting, PlayStartBeep, Recording, PlayEndBeep};
 Mode mode = Mode::Initialising;
 
-float beep_volume = 0.95f; // not too loud :-)
+float beep_volume = 0.2f; // not too loud :-)
 
 uint32_t MTPcheckInterval; // default value of device check interval [ms]
 
@@ -115,8 +115,7 @@ void setup() {
   // Initialize the SD card
   SPI.setMOSI(SDCARD_MOSI_PIN);
   SPI.setSCK(SDCARD_SCK_PIN);
-  if (!(SD.begin(SDCARD_CS_PIN))) 
-  {
+  if (!(SD.begin(SDCARD_CS_PIN))) {
     // stop here if no SD card, but print a message
     while (1) {
       Serial.println("Unable to access the SD card");
@@ -162,7 +161,6 @@ void loop() {
         Serial.println("Handset lifted");
         mode = Mode::Prompting; print_mode();
       }
-
       break;
 
     case Mode::Prompting:
@@ -207,11 +205,14 @@ void loop() {
     case Mode::PlayGreeting:
       break;
 
+    case Mode::PlayStartBeep:
+      break;
+
     case Mode::PlayEndBeep:
       break;
 
     case Mode::Initialising: // to make compiler happy
-      break;  
+      break;
   }   
   
   MTP.loop();  // This is mandatory to be placed in the loop code.
@@ -338,14 +339,15 @@ void dateTime(uint16_t* date, uint16_t* time, uint8_t* ms10) {
   *ms10 = second() & 1 ? 100 : 0;
 }
 
-// blocking delay, which pauses execution of main program logic,
+// Non-blocking delay, which pauses execution of main program logic,
+// but while still listening for input 
 void wait(unsigned int milliseconds) {
   elapsedMillis msec=0;
 
   while (msec <= milliseconds) {
-    //buttonRecord.update();
-    //if (buttonRecord.fallingEdge()) Serial.println("Button (pin 0) Handset lifted");
-    //if (buttonRecord.risingEdge()) Serial.println("Button (pin 0) Handset returned");
+    buttonRecord.update();
+    if (buttonRecord.fallingEdge()) Serial.println("Button (pin 0) Handset lifted");
+    if (buttonRecord.risingEdge()) Serial.println("Button (pin 0) Handset returned");
   }
 }
 
