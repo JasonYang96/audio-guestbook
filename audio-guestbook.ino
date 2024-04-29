@@ -170,7 +170,7 @@ void loop() {
       break;
 
     case Mode::WaitForUser:
-      if (buttonRecord.risingEdge()) {
+      if (buttonRecord.fallingEdge()) {
         mode = Mode::Ready; print_mode();
         break;
       }
@@ -182,7 +182,7 @@ void loop() {
       break;
 
     case Mode::StartGreeting:
-      if (buttonRecord.risingEdge()) {
+      if (buttonRecord.fallingEdge()) {
         mode = Mode::Ready; print_mode();
         break;
       }
@@ -193,7 +193,7 @@ void loop() {
 
     case Mode::PlayGreeting:
       // If message still playing and handset is replaced
-      if(buttonRecord.risingEdge()) {
+      if(buttonRecord.fallingEdge()) {
         playWav1.stop();
         mode = Mode::Ready; print_mode();
       } else if (playWav1.isStopped()) { // message has stopped playing
@@ -202,19 +202,19 @@ void loop() {
       break;
 
     case Mode::PlayStartBeep:
-      if (buttonRecord.risingEdge()) {
+      if (buttonRecord.fallingEdge()) {
         mode = Mode::Ready; print_mode();
       } else {
         // Play the tone sound effect
         waveform1.begin(beep_volume, 440, WAVEFORM_SINE);
-        delay(1250);
+        delay(500);
         waveform1.amplitude(0);
         mode = Mode::StartRecording; print_mode();
       }
       break;
 
     case Mode::StartRecording:
-      if (buttonRecord.risingEdge()) {
+      if (buttonRecord.fallingEdge()) {
         mode = Mode::Ready; print_mode();
       } else {
         startRecording(); // sets mode to Recording
@@ -222,10 +222,10 @@ void loop() {
 
     case Mode::Recording:
       // Handset is replaced
-      if(buttonRecord.risingEdge()){
+      if(buttonRecord.fallingEdge()){
         Serial.println("Stopping Recording");
         stopRecording();
-        mode = Mode::PlayEndBeep; print_mode();
+        mode = Mode::Ready; print_mode();
       }
       else {
         continueRecording();
@@ -378,7 +378,7 @@ void wait(unsigned int milliseconds) {
   while (msec <= milliseconds) {
     buttonRecord.update();
     if (buttonRecord.fallingEdge()) Serial.println("Button (pin 0) Handset lifted");
-    if (buttonRecord.risingEdge()) Serial.println("Button (pin 0) Handset returned");
+    if (buttonRecord.fallingEdge()) Serial.println("Button (pin 0) Handset returned");
   }
 }
 
