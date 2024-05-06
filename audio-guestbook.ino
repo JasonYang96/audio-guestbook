@@ -62,13 +62,16 @@ char filename[15];
 File frec;
 
 // Use long 40ms debounce time on both switches
-Bounce buttonRecord = Bounce(HOOK_PIN, 40);
+Bounce buttonRecord = Bounce(HOOK_PIN, 100);
 
 // Keep track of current state of the device
-enum Mode {Initialising, Ready, WaitForUser, StartGreeting, PlayGreeting, PlayStartBeep, StartRecording, Recording, PlayEndBeep};
+enum Mode {Initialising, Ready, WaitForUser,
+  StartGreeting, PlayGreeting, PlayStartBeep, StartStartBeep,
+  StartRecording, Recording, StartEndBeep, PlayEndBeep, WaitEndBeep
+};
 Mode mode = Mode::Initialising;
 
-float beep_volume = 0.2f; // not too loud :-)
+float beep_volume = 0.6f; // not too loud :-)
 
 uint32_t MTPcheckInterval; // default value of device check interval [ms]
 
@@ -88,7 +91,12 @@ byte byte1, byte2, byte3, byte4;
 
 // variables to set up waiting
 unsigned long previousMillis;
-const long msToWaitForUser = 1000;
+unsigned long msToWaitForUser;
+const int waitForPickUp = 1000;
+const int waitStartBeep = 250;
+const int waitEndBeep = 250;
+const int timesEndBeep = 3;
+unsigned int beepCount = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -111,7 +119,7 @@ void setup() {
   sgtl5000_1.inputSelect(AUDIO_INPUT_MIC);
   sgtl5000_1.adcHighPassFilterEnable();
   sgtl5000_1.micGain(39); // in decibels 
-  sgtl5000_1.volume(0.95); // in percent
+  sgtl5000_1.volume(1); // in percent
 
   mixer.gain(0, 1.0f);
   mixer.gain(1, 1.0f);
@@ -145,13 +153,7 @@ void setup() {
   // (i.e. saving a new audio recording onto the SD card)
   FsDateTime::setCallback(dateTime);
 
-  mode = Mode::Ready; print_mode();
-
-  // Play a beep to indicate system is online
-  waveform1.begin(beep_volume, 440, WAVEFORM_SINE);
-  delay(1000);
-  waveform1.amplitude(0);
-  delay(1000);
+  mode = Mode::Initialising; print_mode();
 }
 
 void loop() {
@@ -165,6 +167,7 @@ void loop() {
         Serial.println("Handset lifted");
         // Wait a second for users to put the handset to their ear
         previousMillis = millis();
+        msToWaitForUser = waitForPickUp;
         mode = Mode::WaitForUser; print_mode();
       }
       break;
@@ -197,20 +200,30 @@ void loop() {
         playWav1.stop();
         mode = Mode::Ready; print_mode();
       } else if (playWav1.isStopped()) { // message has stopped playing
-        mode = Mode::PlayStartBeep; print_mode();
+        mode = Mode::StartRecording; print_mode();
       } // else message still playing, loop again
       break;
 
-    case Mode::PlayStartBeep:
+    case Mode::StartStartBeep:
       if (buttonRecord.fallingEdge()) {
         mode = Mode::Ready; print_mode();
       } else {
         // Play the tone sound effect
+        msToWaitForUser = waitStartBeep;
+        previousMillis = millis();
         waveform1.begin(beep_volume, 440, WAVEFORM_SINE);
-        delay(500);
-        waveform1.amplitude(0);
-        mode = Mode::StartRecording; print_mode();
+        mode = Mode::PlayStartBeep; print_mode();
       }
+      break;
+
+    case Mode::PlayStartBeep:
+      if (buttonRecord.fallingEdge()) {
+        waveform1.amplitude(0);
+        mode = Mode::Ready; print_mode();
+      } else if (millis() - previousMillis >= msToWaitForUser) {
+        waveform1.amplitude(0);
+        mode = Mode::Recording; print_mode();
+      } // else still beeping, keep looping
       break;
 
     case Mode::StartRecording:
@@ -225,39 +238,66 @@ void loop() {
       if(buttonRecord.fallingEdge()){
         Serial.println("Stopping Recording");
         stopRecording();
-        mode = Mode::Ready; print_mode();
+        beepCount = 0;
+        mode = Mode::StartEndBeep; print_mode();
       }
       else {
         continueRecording();
       }
       break;
 
-    case Mode::PlayEndBeep:
-      if(buttonRecord.fallingEdge()) { // picked up the phone while the endbeep is playing
-        mode = Mode::StartGreeting; print_mode();
-      } else {
-        // Play audio tone to confirm recording has ended
-        end_Beep();
-        mode = Mode::Ready; print_mode();
-      }
+    case Mode::StartEndBeep:
+      // Play audio tone to confirm recording has ended
+      waveform1.frequency(523.25);
+      waveform1.amplitude(beep_volume);
+      msToWaitForUser = waitEndBeep;
+      previousMillis = millis();
+      mode = Mode::PlayEndBeep; print_mode();
       break;
 
-    case Mode::Initialising: // to make compiler happy
+    case Mode::PlayEndBeep:
+      if(buttonRecord.fallingEdge()) { // picked up the phone while the endbeep is playing
+        waveform1.amplitude(0);
+        mode = Mode::StartGreeting; print_mode();
+      } else if (millis() - previousMillis >= msToWaitForUser) {
+        waveform1.amplitude(0);
+        beepCount += 1;
+
+        if (beepCount == 3) {
+          mode = Mode::Ready; print_mode();
+        } else {
+          mode = Mode::WaitEndBeep; print_mode();
+          previousMillis = millis();
+          msToWaitForUser = waitEndBeep;
+        }
+      } // else still beeping, loop again
+      break;
+    
+    case Mode::WaitEndBeep:
+      if(buttonRecord.fallingEdge()) { // picked up the phone while the endbeep is waiting
+        mode = Mode::StartGreeting; print_mode();
+      } else if (millis() - previousMillis >= msToWaitForUser) {
+        mode = Mode::StartEndBeep; print_mode();
+      } // else still waiting, loop again
+      break;
+
+    case Mode::Initialising:
+      // Play a beep to indicate system is online
+      waveform1.begin(beep_volume, 440, WAVEFORM_SINE);
+      delay(1000);
+      waveform1.amplitude(0);
+      mode = Mode::Ready; print_mode();
       break;
   }   
   
   MTP.loop();  // This is mandatory to be placed in the loop code.
 }
 
-void setMTPdeviceChecks(bool enable)
-{
-  if (enable)
-  {
+void setMTPdeviceChecks(bool enable) {
+  if (enable) {
     MTP.storage()->set_DeltaDeviceCheckTimeMS(MTPcheckInterval);
     Serial.print("En");
-  }
-  else
-  {
+  } else {
     MTP.storage()->set_DeltaDeviceCheckTimeMS((uint32_t) -1);
     Serial.print("Dis");
   }
@@ -290,7 +330,7 @@ void startRecording() {
     Serial.print("Recording to ");
     Serial.println(filename);
     queue1.begin();
-    mode = Mode::Recording; print_mode();
+    mode = Mode::StartStartBeep; print_mode();
     recByteSaved = 0L;
   }
   else {
@@ -437,15 +477,9 @@ void end_Beep(void) {
   waveform1.amplitude(beep_volume);
   wait(250);
   waveform1.amplitude(0);
-  wait(250);
   waveform1.amplitude(beep_volume);
   wait(250);
   waveform1.amplitude(0);
-  wait(250);
-  waveform1.amplitude(beep_volume);
-  wait(250);
-  waveform1.amplitude(0);
-  wait(250);
   waveform1.amplitude(beep_volume);
   wait(250);
   waveform1.amplitude(0);
@@ -463,5 +497,8 @@ void print_mode(void) { // only for debugging
   else if(mode == Mode::Recording)      Serial.println(" Recording");
   else if(mode == Mode::PlayEndBeep)    Serial.println(" PlayEndBeep");
   else if(mode == Mode::Initialising)   Serial.println(" Initialising");
+  else if(mode == Mode::StartStartBeep) Serial.println(" StartStartBeep");
+  else if(mode == Mode::StartEndBeep)   Serial.println(" StartEndBeep");
+  else if(mode == Mode::WaitEndBeep)    Serial.println(" WaitEndBeep");
   else Serial.println(" Undefined");
 }
